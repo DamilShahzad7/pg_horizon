@@ -1,0 +1,12 @@
+-- terminate is denied until the GUC is enabled, and never kills this backend
+\set VERBOSITY sqlstate
+SELECT pg_horizon_terminate_blocker(pg_backend_pid());
+ERROR:  55000
+SELECT pg_horizon_terminate_blocker(pg_backend_pid(), true);
+ERROR:  55000
+SELECT pg_horizon_terminate_blocker(NULL);
+ pg_horizon_terminate_blocker 
+------------------------------
+ 
+(1 row)
+

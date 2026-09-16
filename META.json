@@ -1,0 +1,46 @@
+{
+   "name": "pg_horizon",
+   "abstract": "Diagnose PostgreSQL XID/MultiXact freeze horizons and attribute the backends, slots, and prepared transactions that hold them",
+   "description": "pg_horizon reads the same exported horizon functions VACUUM uses, then attributes blockers from PGPROC, replication slots, and prepared transactions. It tells you whether freeze is stuck on a horizon holder or on vacuum lag, and it refuses wraparound workarounds such as VACUUM FULL or silently raising autovacuum_freeze_max_age.",
+   "version": "1.0.0",
+   "maintainer": "pg_horizon authors",
+   "license": "postgresql",
+   "provides": {
+      "pg_horizon": {
+         "abstract": "XID/MultiXact freeze horizon diagnosis",
+         "file": "pg_horizon--1.0.sql",
+         "version": "1.0.0"
+      }
+   },
+   "prereqs": {
+      "runtime": {
+         "requires": {
+            "PostgreSQL": "16.0.0"
+         }
+      }
+   },
+   "resources": {
+      "bugtracker": {
+         "web": "https://github.com/DamilShahzad7/pg_horizon/issues"
+      },
+      "repository": {
+        "url": "https://github.com/DamilShahzad7/pg_horizon.git",
+        "web": "https://github.com/DamilShahzad7/pg_horizon",
+         "type": "git"
+      }
+   },
+   "generated_by": "pg_horizon authors",
+   "meta-spec": {
+      "version": "1.0.0",
+      "url": "https://pgxn.org/meta/spec.txt"
+   },
+   "tags": [
+      "vacuum",
+      "wraparound",
+      "xmin",
+      "multixact",
+      "replication",
+      "observability",
+      "autovacuum"
+   ]
+}

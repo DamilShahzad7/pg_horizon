@@ -1,0 +1,11 @@
+# Generated
+/log/
+/results/
+/tmp_check/
+*.o
+*.so
+*.dylib
+*.bc
+regression.diffs
+regression.out
+.deps/

@@ -1,0 +1,12 @@
+.git
+.github
+tmp_check
+results
+log
+*.o
+*.so
+*.dylib
+*.bc
+regression.diffs
+regression.out
+.DS_Store

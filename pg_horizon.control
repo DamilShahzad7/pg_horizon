@@ -1,0 +1,5 @@
+# pg_horizon extension
+comment = 'diagnose XID/MultiXact freeze horizons and the backends, slots, and prepared transactions holding them'
+default_version = '1.0'
+module_pathname = '$libdir/pg_horizon'
+relocatable = true

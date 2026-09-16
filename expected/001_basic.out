@@ -1,0 +1,88 @@
+CREATE EXTENSION pg_horizon;
+SELECT extname, extversion FROM pg_extension WHERE extname = 'pg_horizon';
+  extname   | extversion 
+------------+------------
+ pg_horizon | 1.0
+(1 row)
+
+SELECT severity IN ('ok', 'warning', 'critical', 'emergency') AS severity_known
+FROM pg_horizon;
+ severity_known 
+----------------
+ t
+(1 row)
+
+SELECT wraparound_pct >= 0 AND wraparound_pct <= 100 AS wraparound_pct_ok
+FROM pg_horizon;
+ wraparound_pct_ok 
+-------------------
+ t
+(1 row)
+
+SELECT xid_headroom > 0 AS xid_headroom_positive
+FROM pg_horizon;
+ xid_headroom_positive 
+-----------------------
+ t
+(1 row)
+
+SELECT freeze_max_age > 0 AND failsafe_age > 0 AS limits_match_core
+FROM pg_horizon;
+ limits_match_core 
+-------------------
+ t
+(1 row)
+
+SELECT pg_horizon_report() LIKE 'pg_horizon diagnostic report%' AS report_header_ok;
+ report_header_ok 
+------------------
+ t
+(1 row)
+
+SELECT status IN ('ok', 'warning', 'critical', 'emergency') AS check_status_ok,
+       code IN (0, 1, 2) AS check_code_ok
+FROM pg_horizon_check;
+ check_status_ok | check_code_ok 
+-----------------+---------------
+ t               | t
+(1 row)
+
+SELECT count(*) >= 1 AS has_databases
+FROM pg_horizon_databases;
+ has_databases 
+---------------
+ t
+(1 row)
+
+SELECT count(*) FILTER (WHERE is_oldest) = 1 AS one_oldest_database
+FROM pg_horizon_databases;
+ one_oldest_database 
+---------------------
+ t
+(1 row)
+
+SELECT data_xmin IS NOT NULL
+       AND shared_xmin IS NOT NULL
+       AND catalog_xmin IS NOT NULL AS xmin_horizons_present
+FROM pg_horizon;
+ xmin_horizons_present 
+-----------------------
+ t
+(1 row)
+
+SELECT count(*) FILTER (WHERE relname = 'pg_proc') = 1
+       AND count(*) FILTER (WHERE relname = 'pg_class') = 1 AS catalogs_listed
+FROM pg_horizon_relations;
+ catalogs_listed 
+-----------------
+ t
+(1 row)
+
+SELECT freeze_constraint = 'ok' AS healthy_catalog_ok
+FROM pg_horizon_relations
+WHERE relname = 'pg_class';
+ healthy_catalog_ok 
+--------------------
+ t
+(1 row)
+
