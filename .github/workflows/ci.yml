@@ -36,7 +36,10 @@ jobs:
           sudo chown -R postgres:postgres "$GITHUB_WORKSPACE"
           sudo pg_createcluster --start ${{ matrix.pg }} main \
             || sudo pg_ctlcluster ${{ matrix.pg }} main start
+          pg_lsclusters
+          PGPORT=$(pg_lsclusters | awk -v v="${{ matrix.pg }}" '$1 == v { print $3; exit }')
           sudo -u postgres env PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config \
             PATH="/usr/lib/postgresql/${{ matrix.pg }}/bin:$PATH" \
             PGUSER=postgres \
+            PGPORT="$PGPORT" \
             make installcheck
