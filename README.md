@@ -1,165 +1,152 @@
 # pg_horizon
 
-**See what is holding back VACUUM, freezing, and replication — and get the real fix, not a workaround.**
+pg_horizon is a PostgreSQL extension for inspecting XID and MultiXact freeze horizons. It reports cluster wraparound state and lists backends, prepared transactions, replication slots, and `hot_standby_feedback` WAL senders that are holding those horizons.
 
-PostgreSQL will stop accepting writes when transaction IDs wrap. Before that happens, dead tuples stop being removable and tables bloat because something is pinning the **xmin horizon**. The holder is almost never “autovacuum is broken”. It is one of:
+The extension does not change freeze behaviour. It does not require `shared_preload_libraries` or a PostgreSQL restart.
 
-1. A session **idle in transaction**
-2. A **prepared transaction** that was never committed
-3. A **replication slot** (often an orphan)
-4. **hot_standby_feedback** from a standby that itself has a long snapshot or a logical slot
-5. Autovacuum actually lagging, which is a different failure and needs VACUUM, not a killed replica
+See [docs/runbook.md](docs/runbook.md) and [docs/internals.md](docs/internals.md) for operational and implementation detail.
 
-Amazon RDS/Aurora shipped a proprietary `postgres_get_av_diag()` because this diagnosis is missing from core. PostgresAI documents a four-view SQL recipe that still cannot see `catalog_xmin` vs data xmin the way `ComputeXidHorizons()` does. **pg_horizon is the open, in-database form of that diagnosis**, built as a C extension that calls the same exported backend functions VACUUM uses.
+## Features
 
-## The gap
-
-| What exists today | What it does not do |
-| --- | --- |
-| `age(datfrozenxid)` / `age(relfrozenxid)` | Tells you freeze is late, not **who** is pinning OldestXmin |
-| `pg_stat_activity.backend_xmin` | Misses prepared xacts, slots, and catalog vs data |
-| `pg_replication_slots.xmin` | Easy to drop a **live** replica’s slot if you treat every old xmin as an orphan |
-| `VACUUM FULL` / raising `autovacuum_freeze_max_age` | Hides wraparound; `VACUUM FULL` needs an XID you may no longer have |
-| RDS `postgres_get_av_diag()` | Closed source, cloud-only |
-| SQL scripts (PostgresAI howto) | Approximate, race-prone, no relation-level freeze constraint |
-
-pg_horizon answers three questions that production incidents actually need:
-
-1. **How close is wraparound?** — using `TransamVariables` vac/warn/stop limits, not a guessed percentage
-2. **Who holds the horizon?** — backends, prepared xacts, physical/logical slots, standby feedback
-3. **Will `VACUUM FREEZE` help this table?** — `freeze_constraint = horizon` means no, remove the holder first; `vacuum_lag` means yes, vacuum is behind
+- Cluster XID/MultiXact horizons and wraparound headroom
+- Horizon holders visible to the extension
+- Per-database and per-relation freeze age
+- Per-relation freeze explanation and a `VACUUM FREEZE` statement
+- Optional terminate of a supported backend, off by default
 
 ## Requirements
 
-- PostgreSQL **16, 17, or 18**
-- A host that can install C extensions (self-managed, CloudNativePG, many on-prem packs). Not RDS/Aurora custom C.
-- No `shared_preload_libraries` and no restart
+Tested on PostgreSQL 16, 17, and 18. It will not compile on 15 or earlier.
 
-## Install
+You need PostgreSQL server development files (PGXS) and a `pg_config` that matches the server that will load the library. Managed services that do not allow user C extensions cannot install it.
 
-```sh
+## Installation
+
+```bash
+git clone https://github.com/DamilShahzad7/pg_horizon.git
+cd pg_horizon
 make
-sudo make install
+make install
+```
+
+If `pg_config` is not the right server:
+
+```bash
+make PG_CONFIG=/path/to/pg_config
+make PG_CONFIG=/path/to/pg_config install
 ```
 
 ```sql
 CREATE EXTENSION pg_horizon;
 ```
 
-`pg_config` must point at the server you will load the library into.
-
-## 30-second incident loop
+## Quick start
 
 ```sql
--- 1. How bad is it?
-SELECT severity, xid_age, xid_headroom, wraparound_pct, blocker_count
+SELECT severity, xid_age, xid_headroom, oldest_xid_db_name, blocker_count
 FROM pg_horizon;
 
--- 2. Who is pinning OldestXmin?
-SELECT blocker_type, pid, slot_name, state, xmin_age,
-       is_idle_in_transaction, safe_to_terminate, recommended_sql
+SELECT blocker_type, pid, slot_name, prepared_gid, state, xmin_age,
+       recommended_sql, reason
 FROM pg_horizon_blockers
 ORDER BY xmin_age DESC NULLS LAST;
 
--- 3. Why is this table not freezing?
-SELECT freeze_constraint, diagnosis, vacuum_sql, dominant_blocker
-FROM pg_horizon_explain('public.orders');
+SELECT schemaname, relname, xid_age, freeze_constraint
+FROM pg_horizon_relations
+ORDER BY xid_age DESC
+LIMIT 20;
 
--- 4. Human-readable dump for the incident channel
-SELECT pg_horizon_report();
-```
+SELECT freeze_constraint, relation_xmin, freeze_limit, diagnosis, vacuum_sql
+FROM pg_horizon_explain('pg_class');
 
-Nagios / cron / Prometheus textfile:
-
-```sql
 SELECT status, code, oldest_xid_age, xid_headroom, message
 FROM pg_horizon_check;
 ```
 
-`code` is 0 (ok), 1 (warning), 2 (critical/emergency).
-
-## What “real fix” means here
-
-pg_horizon will **not** recommend:
-
-- `VACUUM FULL` (takes `ACCESS EXCLUSIVE`, consumes XIDs, does not move OldestXmin)
-- Raising `autovacuum_freeze_max_age` to silence wraparound
-- Dropping an **active** physical slot that a replica is still using
-- Killing autovacuum wraparound workers
-
-It **will** recommend:
-
-- `COMMIT` / `ROLLBACK` / `pg_terminate_backend` for **abandoned idle-in-transaction**
-- `pg_cancel_backend` first for a still-running statement
-- `COMMIT PREPARED` / `ROLLBACK PREPARED` for two-phase leftovers
-- Consume or drop a slot **after** you confirm the consumer is gone
-- `VACUUM (FREEZE, INDEX_CLEANUP ON, PROCESS_TOAST)` when freeze is vacuum-lag, not horizon-bound
-
-Terminate is explicit and off by default:
-
-```sql
-ALTER SYSTEM SET pg_horizon.terminate_blockers = on;
-SELECT pg_reload_conf();
-SELECT pg_horizon_terminate_blocker(pid := 12345);
-```
-
-That function still refuses slots, prepared xacts, wraparound vacuum, walsenders, and the current backend.
+`pg_horizon` is a view. `pg_horizon_blockers` is also a view; it hides the backend running the query. Use `pg_horizon_blockers(true)` to include it.
 
 ## Views and functions
 
-| Object | Purpose |
-| --- | --- |
-| `pg_horizon` | Cluster XID/MXID horizons, core wraparound limits, severity |
-| `pg_horizon_blockers` | Every xmin/xid/catalog_xmin holder, wait-for locks, recommended SQL |
-| `pg_horizon_databases` | Per-database `datfrozenxid` / `datminmxid` |
-| `pg_horizon_relations` | Per-table freeze age and `horizon` vs `vacuum_lag` |
-| `pg_horizon_explain(regclass)` | One table: the xmin VACUUM would use, freeze limit, diagnosis |
-| `pg_horizon_report()` | Text report for tickets |
-| `pg_horizon_check` | Monitoring row |
-| `pg_horizon_vacuum_sql(regclass)` | The VACUUM FREEZE statement to run |
-| `pg_horizon_terminate_blocker(pid, force)` | Guarded SIGTERM |
+Several names are both a function and a view. `SELECT * FROM name` uses the view. `pg_horizon` is a view over `pg_horizon_status()`.
 
-Query text follows `pg_stat_activity` rules: superuser or `pg_read_all_stats`, otherwise only your own sessions.
+| Object | Type | Description |
+| --- | --- | --- |
+| `pg_horizon` | view | Cluster horizons, wraparound limits, severity |
+| `pg_horizon_blockers` | view | Holders, excluding the calling backend; adds `xact_age` |
+| `pg_horizon_blockers(include_observer boolean DEFAULT false)` | function | Same without `xact_age` |
+| `pg_horizon_databases` | view | Per-database `datfrozenxid` / `datminmxid` |
+| `pg_horizon_relations` | view | Per-relation freeze age and `freeze_constraint`; adds `schemaname` |
+| `pg_horizon_relations(min_age bigint DEFAULT 0)` | function | Same without `schemaname` |
+| `pg_horizon_explain(rel regclass)` | function | Freeze limit, diagnosis, vacuum SQL, dominant blocker |
+| `pg_horizon_vacuum_sql(rel regclass)` | function | `VACUUM (FREEZE, …)` statement for one relation |
+| `pg_horizon_report()` | function | Text report |
+| `pg_horizon_check` | view | Monitoring row (`status`, `code`, …) |
+| `pg_horizon_terminate_blocker(pid integer, force boolean DEFAULT false)` | function | Terminate a supported backend when enabled |
+
+`freeze_constraint` on relations is a text column: `ok`, `horizon`, or `vacuum_lag`.
+
+`pg_horizon_explain` and `pg_horizon_vacuum_sql` are `STRICT` and apply to tables, materialized views, and TOAST tables.
 
 ## Configuration
 
-| GUC | Default | Meaning |
+| GUC | Default | Context |
 | --- | --- | --- |
-| `pg_horizon.min_xmin_age` | `0` | Hide holders younger than this many XIDs |
-| `pg_horizon.terminate_blockers` | `off` | Master switch for `pg_horizon_terminate_blocker` (`SIGHUP` / superuser) |
+| `pg_horizon.min_xmin_age` | `0` | user |
+| `pg_horizon.terminate_blockers` | `off` | superuser |
 
-## How it is implemented
+`min_xmin_age` hides holders younger than that many XIDs.
 
-Horizons are **not** recomputed in SQL. The extension calls:
+`pg_horizon.terminate_blockers` is only a switch. Turning it on does not terminate anyone.
 
-- `GetOldestNonRemovableTransactionId()` (the function VACUUM uses on PostgreSQL 16+)
-- `GetOldestTransactionIdConsideredRunning()`
-- `GetReplicationHorizons()`
-- `TransamVariables` (PostgreSQL 17+) or `ShmemVariableCache` (16) vac/warn/stop/wrap limits under `XidGenLock`
-- `GetOldestMultiXactId()` / `ReadNextMultiXactId()`
-
-Holders are copied under `ProcArrayLock`, `ReplicationSlotControlLock`, and the slot mutex, then matched to `pgstat` activity, `GetLockStatusData()`, and `pg_prepared_xacts`. That is the same shared-memory picture VACUUM uses, with names attached.
-
-See [docs/internals.md](docs/internals.md) and [docs/runbook.md](docs/runbook.md).
-
-## Tests
-
-```sh
-make installcheck          # SQL regression + TAP
+```sql
+SET pg_horizon.terminate_blockers = on;
+SELECT pg_horizon_terminate_blocker(12345);
 ```
 
-Or against official images:
+That calls `pg_terminate_backend` on a backend that holds xmin, which aborts its open transaction. It will not signal slots, prepared transactions, walsenders, autovacuum, or the current backend. `force` also allows an `active` backend; it does not skip the other checks.
 
-```sh
+## Permissions
+
+Reading the diagnostic views does not require superuser (`GRANT SELECT` / `GRANT EXECUTE` to `PUBLIC`).
+
+Query text is shown for superusers, members of `pg_read_all_stats`, or the backend’s own role, as with `pg_stat_activity`.
+
+`pg_horizon_terminate_blocker` is revoked from `PUBLIC`. The GUC is superuser-only. The function also requires superuser, `pg_signal_backend`, or that the target session belongs to the caller.
+
+## How it works
+
+Each call reads current backend state (XID limits, visibility horizons, MultiXact, slots, `PGPROC`, locks, and freeze ages on `pg_class` / `pg_database`) and attaches a reason to holders it can see. Details are in [docs/internals.md](docs/internals.md).
+
+## Limitations
+
+- Tested on PostgreSQL 16–18.
+- Not installable where user C extensions are disallowed.
+- Results are a snapshot at call time.
+- Suggested SQL is not executed for you.
+
+## Testing
+
+```bash
+make installcheck          # SQL tests in sql/
+make prove_installcheck    # TAP tests in t/
+```
+
+`installcheck` needs a running server with the extension installed. CI uses PostgreSQL 16, 17, and 18.
+
+```bash
 ./scripts/docker-test.sh 16
 ./scripts/docker-test.sh 17
 ./scripts/docker-test.sh 18
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md).
+
 ## License
 
-[PostgreSQL License](LICENSE)
-
-## Status
-
-1.0.0 — production diagnostic. It does not change freeze behaviour; it tells you why freeze cannot advance and which core command will.
+PostgreSQL License. See [LICENSE](LICENSE).
