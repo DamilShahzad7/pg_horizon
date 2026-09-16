@@ -32,11 +32,10 @@ jobs:
 
       - name: Regression tests
         run: |
-          # postgres must be able to traverse to GITHUB_WORKSPACE and write
-          # results/ / tmp_check/ there (pg_regress mkdir).
           sudo chmod 755 /home/runner /home/runner/work "$(dirname "$GITHUB_WORKSPACE")"
           sudo chown -R postgres:postgres "$GITHUB_WORKSPACE"
-          sudo pg_ctlcluster ${{ matrix.pg }} main start || true
+          sudo pg_createcluster --start ${{ matrix.pg }} main \
+            || sudo pg_ctlcluster ${{ matrix.pg }} main start
           sudo -u postgres env PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config \
             PATH="/usr/lib/postgresql/${{ matrix.pg }}/bin:$PATH" \
             PGUSER=postgres \
