@@ -29,10 +29,15 @@ jobs:
         run: |
           sudo make PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
           sudo make PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config install
-          sudo chown -R postgres:postgres "$GITHUB_WORKSPACE"
 
       - name: Regression tests
         run: |
+          # postgres must be able to traverse to GITHUB_WORKSPACE and write
+          # results/ / tmp_check/ there (pg_regress mkdir).
+          sudo chmod 755 /home/runner /home/runner/work "$(dirname "$GITHUB_WORKSPACE")"
+          sudo chown -R postgres:postgres "$GITHUB_WORKSPACE"
+          sudo pg_ctlcluster ${{ matrix.pg }} main start || true
           sudo -u postgres env PG_CONFIG=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config \
             PATH="/usr/lib/postgresql/${{ matrix.pg }}/bin:$PATH" \
+            PGUSER=postgres \
             make installcheck
