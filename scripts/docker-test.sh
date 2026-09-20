@@ -23,14 +23,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The official image first starts a temporary server that listens on the unix
+# socket only, runs the init scripts, stops it, and then starts the real one.
+# pg_isready over the socket succeeds against the temporary server, so wait on
+# TCP, which only the real server serves.
 echo "==> Waiting for readiness"
-for i in $(seq 1 60); do
-  if docker exec "${NAME}" pg_isready -U postgres >/dev/null 2>&1; then
+ready=0
+for i in $(seq 1 90); do
+  if docker exec "${NAME}" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1; then
+    ready=1
     break
   fi
   sleep 1
 done
-docker exec "${NAME}" pg_isready -U postgres
+if [ "${ready}" -ne 1 ]; then
+  echo "postgres did not become ready" >&2
+  docker logs "${NAME}" >&2 || true
+  exit 1
+fi
 
 echo "==> Smoke tests"
 docker exec -u postgres "${NAME}" /usr/local/bin/pg-horizon-test

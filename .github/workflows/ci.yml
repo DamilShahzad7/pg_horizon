@@ -43,3 +43,15 @@ jobs:
             PGUSER=postgres \
             PGPORT="$PGPORT" \
             make installcheck
+
+  # PostgreSQL built from source with --enable-cassert: assertions catch lock,
+  # memory-context and buffer-overrun mistakes that a release build hides.
+  cassert:
+    name: PostgreSQL 18 (assertions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build PostgreSQL with assertions and run all tests
+        run: ./scripts/docker-test-cassert.sh 18.6

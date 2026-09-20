@@ -10,3 +10,80 @@ SELECT pg_horizon_terminate_blocker(NULL);
  
 (1 row)
 
+\set VERBOSITY terse
+-- with the switch on, the current backend and non-holders are still refused
+SET pg_horizon.terminate_blockers = on;
+SELECT pg_horizon_terminate_blocker(pg_backend_pid());
+ERROR:  refusing to terminate the current backend
+SELECT pg_horizon_terminate_blocker(0);
+ERROR:  pid must be a live backend, not a prepared transaction or slot
+SELECT pg_horizon_terminate_blocker(2147483647);
+ERROR:  pid 2147483647 is not holding an xmin/xid that pg_horizon can see
+RESET pg_horizon.terminate_blockers;
+-- everything except terminate is executable by PUBLIC
+SELECT p.proname,
+       has_function_privilege('public', p.oid, 'execute') AS public_can_execute
+FROM pg_proc p
+JOIN pg_depend d ON d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e'
+WHERE d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'pg_horizon')
+ORDER BY p.proname;
+           proname            | public_can_execute 
+------------------------------+--------------------
+ pg_horizon_blockers          | t
+ pg_horizon_check             | t
+ pg_horizon_databases         | t
+ pg_horizon_explain           | t
+ pg_horizon_relations         | t
+ pg_horizon_report            | t
+ pg_horizon_status            | t
+ pg_horizon_terminate_blocker | f
+ pg_horizon_vacuum_sql        | t
+(9 rows)
+
+-- an unprivileged role can use the diagnostics, but cannot terminate or enable terminate
+CREATE ROLE horizon_plain NOLOGIN;
+GRANT ALL ON SCHEMA public TO horizon_plain;
+SET ROLE horizon_plain;
+SELECT count(*) >= 0 AS views_readable FROM pg_horizon_blockers;
+ views_readable 
+----------------
+ t
+(1 row)
+
+SELECT severity IS NOT NULL AS status_readable FROM pg_horizon;
+ status_readable 
+-----------------
+ t
+(1 row)
+
+SELECT status IS NOT NULL AS check_readable FROM pg_horizon_check;
+ check_readable 
+----------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS databases_readable FROM pg_horizon_databases;
+ databases_readable 
+--------------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS relations_readable FROM pg_horizon_relations;
+ relations_readable 
+--------------------
+ t
+(1 row)
+
+SELECT pg_horizon_report() IS NOT NULL AS report_readable;
+ report_readable 
+-----------------
+ t
+(1 row)
+
+SELECT pg_horizon_terminate_blocker(2147483647);
+ERROR:  permission denied for function pg_horizon_terminate_blocker
+SET pg_horizon.terminate_blockers = on;
+ERROR:  permission denied to set parameter "pg_horizon.terminate_blockers"
+RESET ROLE;
+DROP OWNED BY horizon_plain;
+DROP ROLE horizon_plain;

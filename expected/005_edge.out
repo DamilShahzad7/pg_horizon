@@ -1,0 +1,144 @@
+\set VERBOSITY terse
+-- the report has every section and says what it measures
+SELECT pg_horizon_report() LIKE '%Horizons a VACUUM started now would see (this session excluded)%' AS report_says_what_it_measures,
+       pg_horizon_report() LIKE '%Dominant holder%' AS report_has_dominant_section,
+       pg_horizon_report() LIKE '%Oldest holders%' AS report_has_holders_section,
+       pg_horizon_report() LIKE '%vacuum_multixact_failsafe_age%' AS report_has_multixact_limits;
+ report_says_what_it_measures | report_has_dominant_section | report_has_holders_section | report_has_multixact_limits 
+------------------------------+-----------------------------+----------------------------+-----------------------------
+ t                            | t                           | t                          | t
+(1 row)
+
+-- at status ok the check message is calm and says why
+SELECT status <> 'ok' OR message LIKE 'no wraparound pressure and no stale horizon holder%' AS ok_message_is_calm
+FROM pg_horizon_check;
+ ok_message_is_calm 
+--------------------
+ t
+(1 row)
+
+-- pg_horizon_relations(min_age): a huge threshold hides everything
+SELECT count(*) AS relations_over_max_age FROM pg_horizon_relations(2147483647);
+ relations_over_max_age 
+------------------------
+                      0
+(1 row)
+
+SELECT count(*) > 0 AS relations_with_zero_min FROM pg_horizon_relations(0);
+ relations_with_zero_min 
+-------------------------
+ t
+(1 row)
+
+SELECT count(*) > 0 AS relations_with_null_min FROM pg_horizon_relations(NULL);
+ relations_with_null_min 
+-------------------------
+ t
+(1 row)
+
+-- include_observer NULL behaves like false
+SELECT count(*) = 0 AS null_observer_means_false FROM pg_horizon_blockers(NULL) WHERE pid = pg_backend_pid();
+ null_observer_means_false 
+---------------------------
+ t
+(1 row)
+
+-- direct function calls, not only the views
+SELECT count(*) = 1 AS status_function FROM pg_horizon_status();
+ status_function 
+-----------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS databases_function FROM pg_horizon_databases();
+ databases_function 
+--------------------
+ t
+(1 row)
+
+SELECT status IS NOT NULL AS check_function FROM pg_horizon_check();
+ check_function 
+----------------
+ t
+(1 row)
+
+-- several calls in one transaction stay consistent and do not accumulate state
+BEGIN;
+SELECT count(*) FROM pg_horizon_blockers(true) WHERE pid = pg_backend_pid();
+ count 
+-------
+     1
+(1 row)
+
+SELECT count(*) FROM pg_horizon_blockers(true) WHERE pid = pg_backend_pid();
+ count 
+-------
+     1
+(1 row)
+
+SELECT severity IS NOT NULL FROM pg_horizon;
+ ?column? 
+----------
+ t
+(1 row)
+
+COMMIT;
+-- lots of calls in one statement (memory contexts, SPI, lock handling)
+-- (the argument depends on g, so the function really runs once per row)
+SELECT count(*) = 300 AS repeated_status_calls
+FROM (SELECT (pg_horizon_status()).blocker_count FROM generate_series(1, 300)) s;
+ repeated_status_calls 
+-----------------------
+ t
+(1 row)
+
+SELECT count(DISTINCT g) = 100 AS repeated_blockers_calls
+FROM generate_series(1, 100) g, LATERAL (SELECT count(*) FROM pg_horizon_blockers(g % 2 = 0)) s;
+ repeated_blockers_calls 
+-------------------------
+ t
+(1 row)
+
+-- horizons are exposed as xids and are comparable with core values
+SELECT next_xid::text::bigint >= data_xmin::text::bigint AS next_is_not_behind_data_horizon
+FROM pg_horizon;
+ next_is_not_behind_data_horizon 
+---------------------------------
+ t
+(1 row)
+
+SELECT oldest_running_xid::text::bigint <= data_xmin::text::bigint AS running_is_not_ahead_of_horizon
+FROM pg_horizon;
+ running_is_not_ahead_of_horizon 
+---------------------------------
+ t
+(1 row)
+
+-- wraparound_pct never exceeds 100 and headroom is never negative
+SELECT wraparound_pct BETWEEN 0 AND 100 AND xid_headroom >= 0 AS bounds_ok FROM pg_horizon;
+ bounds_ok 
+-----------
+ t
+(1 row)
+
+-- pg_horizon.min_xmin_age is a plain integer GUC with sane bounds
+SET pg_horizon.min_xmin_age = -1;
+ERROR:  -1 is outside the valid range for parameter "pg_horizon.min_xmin_age" (0 .. 2147483647)
+SET pg_horizon.min_xmin_age = 2147483648;
+ERROR:  invalid value for parameter "pg_horizon.min_xmin_age": "2147483648"
+SHOW pg_horizon.min_xmin_age;
+ pg_horizon.min_xmin_age 
+-------------------------
+ 0
+(1 row)
+
+SELECT name, context FROM pg_settings WHERE name LIKE 'pg_horizon.%' ORDER BY name;
+             name              |  context  
+-------------------------------+-----------
+ pg_horizon.min_xmin_age       | user
+ pg_horizon.terminate_blockers | superuser
+(2 rows)
+
+-- the prefix is reserved: unknown pg_horizon.* settings are rejected
+SET pg_horizon.no_such_setting = 1;
+ERROR:  invalid configuration parameter name "pg_horizon.no_such_setting"
