@@ -97,8 +97,10 @@ $a->query_safe('BEGIN; SELECT id FROM m WHERE id = 1 FOR SHARE;');
 $b->query_safe('BEGIN; SELECT id FROM m WHERE id = 1 FOR SHARE;');    # makes a MultiXact
 burn_multixacts(2, 1200);
 $node->safe_psql('postgres', 'VACUUM (FREEZE) m;');
-my ($rmx, $mage, $hor) = split /\|/, $node->safe_psql('postgres',
-	"SELECT relminmxid, mxid_age, mxid_horizon FROM pg_horizon_explain('m')");
+my ($rmx, $mage) = split /\|/, $node->safe_psql('postgres',
+	"SELECT relminmxid, mxid_age FROM pg_horizon_relations WHERE relname = 'm'");
+my $hor = $node->safe_psql('postgres',
+	q{SELECT substring(summary from 'mxid_horizon=([0-9]+)') FROM pg_horizon_explain('m')});
 cmp_ok($mage, '>', 10000, "table is past the limit again ($mage), because the old multixact is still live");
 is($rmx, $hor, 'relminmxid is stuck at the oldest live MultiXact');
 is($node->safe_psql('postgres', "SELECT freeze_constraint FROM pg_horizon_explain('m')"),

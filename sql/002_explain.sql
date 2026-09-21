@@ -15,7 +15,7 @@ FROM pg_horizon_explain('horizon_explain_demo');
 
 SELECT summary LIKE 'relation public.horizon_explain_demo relkind=r horizon=data %' AS summary_shape,
        vacuum_sql = 'VACUUM (FREEZE, VERBOSE) public.horizon_explain_demo;' AS vacuum_sql_exact,
-       relminmxid IS NOT NULL AND mxid_age >= 0 AS multixact_columns,
+       summary ~ ' relminmxid age=[0-9]+ mxid_horizon=[0-9]+ ' AS multixact_in_summary,
        freeze_limit IS NOT NULL AS freeze_limit_present
 FROM pg_horizon_explain('horizon_explain_demo');
 

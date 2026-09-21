@@ -2,7 +2,7 @@
 
 ## 1.1.0
 
-Correctness release. Upgrade with `ALTER EXTENSION pg_horizon UPDATE` (see README); the new library works with the 1.0 SQL definitions until you do.
+Correctness release. Upgrade with `ALTER EXTENSION pg_horizon UPDATE` (see README); the new library works with the 1.0 SQL definitions until you do. The update is purely additive (views replaced with appended columns, comments); no function is recreated, so administrators' `GRANT`/`REVOKE` settings are kept.
 
 ### Fixed
 
@@ -38,8 +38,8 @@ Correctness release. Upgrade with `ALTER EXTENSION pg_horizon UPDATE` (see READM
 
 ### Added
 
-- Upgrade path `1.0 -> 1.1` and a full `1.1` install script; `default_version` is `1.1`.
-- `pg_horizon.mxid_freeze_max_age`, `mxid_failsafe_age`; `pg_horizon_blockers.horizon_age`; `pg_horizon_explain.relminmxid`, `mxid_age`, `mxid_horizon`.
+- Upgrade path `1.0 -> 1.1` and a full `1.1` install script; `default_version` is `1.1`. A regression test checks that the upgrade leaves privileges alone and produces the same catalogs as a fresh install.
+- `pg_horizon.mxid_freeze_max_age`, `mxid_failsafe_age` and `pg_horizon_blockers.horizon_age` (appended columns); `pg_horizon_explain().summary` now includes `relminmxid age=` and `mxid_horizon=`.
 - Comments on the views and functions.
 - Tests: an oracle test that compares the reported horizons with `VACUUM (VERBOSE)`'s removable cutoff (`t/002_horizons.pl`), MultiXact, terminate and stale-state race, encoding, replication and visibility TAP tests, and SQL tests for edge cases and the upgrade. `scripts/docker-test-cassert.sh` runs everything against PostgreSQL built with assertions.
 

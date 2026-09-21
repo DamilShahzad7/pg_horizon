@@ -6,6 +6,11 @@ DROP EXTENSION pg_horizon;
 CREATE EXTENSION pg_horizon VERSION '1.0';
 SELECT extversion FROM pg_extension WHERE extname = 'pg_horizon';
 
+-- privileges an administrator set: the update must not touch them
+CREATE ROLE horizon_upgrade_mon NOLOGIN;
+REVOKE EXECUTE ON FUNCTION pg_horizon_explain(regclass) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pg_horizon_explain(regclass) TO horizon_upgrade_mon;
+
 -- objects that depend on the 1.0 views
 CREATE VIEW horizon_user_blockers AS SELECT pid, xmin_age, xact_age FROM pg_horizon_blockers;
 CREATE VIEW horizon_user_status AS SELECT severity, blocker_count FROM pg_horizon;
@@ -31,10 +36,20 @@ FROM pg_attribute WHERE attrelid = 'pg_horizon'::regclass AND attnum > 0;
 SELECT count(*) AS explain_columns_1_1
 FROM pg_proc p, unnest(p.proargmodes) m
 WHERE p.oid = 'pg_horizon_explain(regclass)'::regprocedure AND m IN ('o', 't');
+SELECT has_function_privilege('public', 'pg_horizon_explain(regclass)', 'execute') AS explain_public_after_update,
+       has_function_privilege('horizon_upgrade_mon', 'pg_horizon_explain(regclass)', 'execute') AS explain_grant_kept_after_update;
+SELECT proacl IS NOT NULL AS explain_acl_untouched
+FROM pg_proc WHERE oid = 'pg_horizon_explain(regclass)'::regprocedure;
+SELECT count(*) AS initial_privileges_recorded_for_role
+FROM pg_init_privs WHERE initprivs::text LIKE '%horizon_upgrade_mon%';
 SELECT count(*) >= 0 AS user_blockers_view_survives FROM horizon_user_blockers;
 SELECT severity IS NOT NULL AS user_status_view_survives FROM horizon_user_status;
-SELECT relminmxid IS NOT NULL AS new_explain_columns FROM pg_horizon_explain('pg_class');
 SELECT mxid_freeze_max_age > 0 AS new_status_columns FROM pg_horizon;
+
+-- back to default privileges so the comparison below is about the definitions
+GRANT EXECUTE ON FUNCTION pg_horizon_explain(regclass) TO PUBLIC;
+REVOKE EXECUTE ON FUNCTION pg_horizon_explain(regclass) FROM horizon_upgrade_mon;
+DROP ROLE horizon_upgrade_mon;
 
 -- what a catalog comparison sees
 CREATE TEMP TABLE horizon_sig_upgraded AS
@@ -42,7 +57,7 @@ SELECT 'function' AS kind, p.proname::text AS name,
        pg_get_function_identity_arguments(p.oid) AS args,
        pg_get_function_result(p.oid) AS result,
        concat_ws('/', p.provolatile, p.proparallel, p.proisstrict, p.prosecdef, p.prosrc, p.probin,
-                 p.proacl::text, obj_description(p.oid, 'pg_proc')) AS detail
+                 (SELECT string_agg(x::text, ',' ORDER BY x::text) FROM unnest(p.proacl) x), obj_description(p.oid, 'pg_proc')) AS detail
 FROM pg_proc p
 JOIN pg_depend d ON d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e'
 WHERE d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'pg_horizon')
@@ -50,7 +65,7 @@ UNION ALL
 SELECT 'view', c.relname::text, '',
        (SELECT string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod), ',' ORDER BY a.attnum)
         FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
-       concat_ws('/', pg_get_viewdef(c.oid), c.relacl::text, obj_description(c.oid, 'pg_class'))
+       concat_ws('/', pg_get_viewdef(c.oid), (SELECT string_agg(x::text, ',' ORDER BY x::text) FROM unnest(c.relacl) x), obj_description(c.oid, 'pg_class'))
 FROM pg_class c
 JOIN pg_depend d ON d.objid = c.oid AND d.classid = 'pg_class'::regclass AND d.deptype = 'e'
 WHERE d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'pg_horizon')
@@ -66,7 +81,7 @@ SELECT 'function' AS kind, p.proname::text AS name,
        pg_get_function_identity_arguments(p.oid) AS args,
        pg_get_function_result(p.oid) AS result,
        concat_ws('/', p.provolatile, p.proparallel, p.proisstrict, p.prosecdef, p.prosrc, p.probin,
-                 p.proacl::text, obj_description(p.oid, 'pg_proc')) AS detail
+                 (SELECT string_agg(x::text, ',' ORDER BY x::text) FROM unnest(p.proacl) x), obj_description(p.oid, 'pg_proc')) AS detail
 FROM pg_proc p
 JOIN pg_depend d ON d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e'
 WHERE d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'pg_horizon')
@@ -74,7 +89,7 @@ UNION ALL
 SELECT 'view', c.relname::text, '',
        (SELECT string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod), ',' ORDER BY a.attnum)
         FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
-       concat_ws('/', pg_get_viewdef(c.oid), c.relacl::text, obj_description(c.oid, 'pg_class'))
+       concat_ws('/', pg_get_viewdef(c.oid), (SELECT string_agg(x::text, ',' ORDER BY x::text) FROM unnest(c.relacl) x), obj_description(c.oid, 'pg_class'))
 FROM pg_class c
 JOIN pg_depend d ON d.objid = c.oid AND d.classid = 'pg_class'::regclass AND d.deptype = 'e'
 WHERE d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'pg_horizon')

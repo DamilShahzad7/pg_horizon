@@ -132,10 +132,7 @@ CREATE FUNCTION pg_horizon_explain(
     OUT dead_tuples bigint,
     OUT diagnosis text,
     OUT vacuum_sql text,
-    OUT dominant_blocker text,
-    OUT relminmxid xid,
-    OUT mxid_age bigint,
-    OUT mxid_horizon xid
+    OUT dominant_blocker text
 )
 RETURNS record
 AS 'MODULE_PATHNAME', 'pg_horizon_explain'

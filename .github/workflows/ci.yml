@@ -5,6 +5,10 @@ on:
     branches: [main, master]
   pull_request:
 
+# The workflow only reads the repository; the token needs nothing else.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: PostgreSQL ${{ matrix.pg }}
@@ -14,7 +18,7 @@ jobs:
       matrix:
         pg: ['16', '17', '18']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install PostgreSQL ${{ matrix.pg }}
         run: |
@@ -51,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Build PostgreSQL with assertions and run all tests
         run: ./scripts/docker-test-cassert.sh 18.6

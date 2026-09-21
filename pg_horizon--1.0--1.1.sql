@@ -3,17 +3,19 @@
  * pg_horizon--1.0--1.1.sql
  *	  Upgrade pg_horizon from 1.0 to 1.1
  *
- * What changes at the SQL level:
- *	 pg_horizon_explain()	three OUT columns appended (relminmxid, mxid_age,
- *							mxid_horizon). A function's result row type cannot
- *							be altered, so it is dropped and recreated; nothing
- *							in the extension depends on it.
+ * The SQL changes are purely additive, so nothing is dropped and no privilege
+ * is touched:
  *	 pg_horizon				two columns appended (mxid_freeze_max_age,
  *							mxid_failsafe_age)
  *	 pg_horizon_blockers	one column appended (horizon_age)
+ *	 comments on the views and functions
  *
  * The views are replaced in place (CREATE OR REPLACE VIEW, appended columns
- * only) so objects that users built on top of them keep working.
+ * only) so objects that users built on top of them keep working, and their
+ * privileges are kept. No function is recreated: a function's result row
+ * cannot be altered, and dropping and recreating one would reset the EXECUTE
+ * privileges an administrator has set on it (and, because the new grants would
+ * be recorded as the extension's initial privileges, make pg_dump lose them).
  *
  * Behaviour changes that need no SQL (the C library implements them): the
  * xmin horizons exclude the calling session, MultiXact age is the real
@@ -27,34 +29,6 @@
 
 -- complain if script is sourced in psql, rather than via ALTER EXTENSION
 \echo Use "ALTER EXTENSION pg_horizon UPDATE TO '1.1'" to load this file. \quit
-
-DROP FUNCTION pg_horizon_explain(regclass);
-
-CREATE FUNCTION pg_horizon_explain(
-    rel regclass,
-    OUT relation oid,
-    OUT summary text,
-    OUT relfrozenxid xid,
-    OUT xid_age bigint,
-    OUT relation_xmin xid,
-    OUT relation_xmin_age bigint,
-    OUT freeze_limit xid,
-    OUT freeze_constraint text,
-    OUT vacuum_running boolean,
-    OUT live_tuples bigint,
-    OUT dead_tuples bigint,
-    OUT diagnosis text,
-    OUT vacuum_sql text,
-    OUT dominant_blocker text,
-    OUT relminmxid xid,
-    OUT mxid_age bigint,
-    OUT mxid_horizon xid
-)
-RETURNS record
-AS 'MODULE_PATHNAME', 'pg_horizon_explain'
-LANGUAGE C STRICT VOLATILE PARALLEL RESTRICTED;
-
-GRANT EXECUTE ON FUNCTION pg_horizon_explain(regclass) TO PUBLIC;
 
 CREATE OR REPLACE VIEW pg_horizon AS
     SELECT s.*,

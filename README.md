@@ -53,7 +53,7 @@ make && make install
 ALTER EXTENSION pg_horizon UPDATE;      -- to 1.1
 ```
 
-The 1.1 library also works with the 1.0 SQL definitions, so there is no broken window between `make install` and `ALTER EXTENSION UPDATE`, and no restart is needed. The update appends columns to `pg_horizon` (`mxid_freeze_max_age`, `mxid_failsafe_age`), `pg_horizon_blockers` (`horizon_age`) and `pg_horizon_explain()` (`relminmxid`, `mxid_age`, `mxid_horizon`). Views you built on top of the extension's views keep working. `pg_horizon_explain()` is dropped and recreated, because a function's result row cannot be altered; if you built your own objects on it, drop them first. See [CHANGELOG.md](CHANGELOG.md) for behaviour changes.
+The 1.1 library also works with the 1.0 SQL definitions, so there is no broken window between `make install` and `ALTER EXTENSION UPDATE`, and no restart is needed. The update is purely additive: it appends columns to `pg_horizon` (`mxid_freeze_max_age`, `mxid_failsafe_age`) and `pg_horizon_blockers` (`horizon_age`) and adds comments. No function is dropped or recreated, so `GRANT`/`REVOKE` settings you made on the extension's functions and views are kept, and views you built on top of the extension's views keep working. See [CHANGELOG.md](CHANGELOG.md) for behaviour changes.
 
 ## Quick start
 
@@ -107,7 +107,7 @@ Several names are both a function and a view. `SELECT * FROM name` uses the view
 
 **Holders.** `pg_horizon_blockers` lists every session, prepared transaction and slot that has an xid or xmin, not only the ones pinning something. `is_horizon_holder` says whether the row pins a horizon right now, and `affects_data_horizon` / `affects_catalog_horizon` say whether the row is in scope for this database's horizons at all: a session in another database can pin the shared horizon but never this database's data horizon. `xmin_age` is `NULL` for a holder that has no xid or xmin (a logical slot); `horizon_age` is the oldest of `xmin_age` and `catalog_xmin_age`, so `ORDER BY horizon_age DESC NULLS LAST` puts the worst holder first.
 
-**MultiXacts.** `oldest_mxid` / `mxid_age` in `pg_horizon` is the real wraparound frontier (`min(datminmxid)`). `mxid_horizon` in `pg_horizon_explain` is the oldest MultiXact still in use, which is what `VACUUM` may freeze up to.
+**MultiXacts.** `oldest_mxid` / `mxid_age` in `pg_horizon` is the real wraparound frontier (`min(datminmxid)`). The `mxid_horizon=` value in the `summary` of `pg_horizon_explain` is the oldest MultiXact still in use, which is what `VACUUM` may freeze up to; `pg_horizon_relations` has each table's `relminmxid` and `mxid_age`.
 
 **`freeze_constraint` on relations** is a text column:
 
@@ -198,4 +198,4 @@ See [SECURITY.md](SECURITY.md).
 
 ## License
 
-PostgreSQL License. See [LICENSE](LICENSE).
+PostgreSQL License (SPDX: `PostgreSQL`). Portions are derived from PostgreSQL source code and keep its copyright notice; see [LICENSE](LICENSE).

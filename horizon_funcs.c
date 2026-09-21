@@ -60,7 +60,7 @@ PG_FUNCTION_INFO_V1(pg_horizon_report);
 PG_FUNCTION_INFO_V1(pg_horizon_check);
 PG_FUNCTION_INFO_V1(pg_horizon_vacuum_sql);
 
-/* Widest record any of our functions returns (pg_horizon_explain, 1.1). */
+/* Room for the widest record any of our functions returns, now or in a later version. */
 #define HORIZON_MAX_COLS		32
 
 static Datum
@@ -813,10 +813,10 @@ pg_horizon_explain(PG_FUNCTION_ARGS)
 
 	initStringInfo(&summary);
 	appendStringInfo(&summary,
-					 "relation %s.%s relkind=%c horizon=%s relfrozenxid age=%lld relation_xmin age=%lld relminmxid age=%lld freeze_constraint=%s vacuum_running=%s",
+					 "relation %s.%s relkind=%c horizon=%s relfrozenxid age=%lld relation_xmin age=%lld relminmxid age=%lld mxid_horizon=%u freeze_constraint=%s vacuum_running=%s",
 					 nspname, ci.relname, ci.relkind, horizon_kind_name(kind),
 					 (long long) xage, (long long) horizon_age, (long long) mage,
-					 constraint, vacuum_running ? "yes" : "no");
+					 snap->mxid_horizon, constraint, vacuum_running ? "yes" : "no");
 
 	dom = horizon_dominant_blocker(snap, true, kind);
 
@@ -848,11 +848,6 @@ pg_horizon_explain(PG_FUNCTION_ARGS)
 		horizon_set_text(values, nulls, 13, dom->reason);
 	else
 		nulls[13] = true;
-
-	/* Appended in 1.1; ignored when the installed SQL still declares 14 columns. */
-	horizon_set_xid(values, nulls, 14, ci.relminmxid);
-	values[15] = Int64GetDatum(mage);
-	horizon_set_xid(values, nulls, 16, snap->mxid_horizon);
 
 	tuple = heap_form_tuple(tupdesc, values, nulls);
 	horizon_snapshot_free(snap);
