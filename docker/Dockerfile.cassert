@@ -1,0 +1,30 @@
+# PostgreSQL built from source with assertions, for testing pg_horizon.
+# Assertions catch lock, memory-context and buffer-overrun mistakes that a
+# release build hides. Build: scripts/docker-test-cassert.sh
+ARG PG_VERSION=18.6
+FROM debian:trixie-slim
+ARG PG_VERSION
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl bzip2 bison flex perl pkg-config \
+        libreadline-dev zlib1g-dev libssl-dev libipc-run-perl procps \
+    && rm -rf /var/lib/apt/lists/*
+# The tarball is checked against the SHA-256 that the PostgreSQL project
+# publishes next to it before anything is unpacked or built.
+RUN cd /usr/src \
+    && curl -fsSLO "https://ftp.postgresql.org/pub/source/v${PG_VERSION}/postgresql-${PG_VERSION}.tar.bz2" \
+    && curl -fsSLO "https://ftp.postgresql.org/pub/source/v${PG_VERSION}/postgresql-${PG_VERSION}.tar.bz2.sha256" \
+    && sha256sum -c "postgresql-${PG_VERSION}.tar.bz2.sha256" \
+    && tar xjf "postgresql-${PG_VERSION}.tar.bz2" \
+    && rm "postgresql-${PG_VERSION}.tar.bz2" "postgresql-${PG_VERSION}.tar.bz2.sha256" \
+    && cd /usr/src/postgresql-${PG_VERSION} \
+    && ./configure --prefix=/opt/pg --enable-cassert --enable-debug --enable-tap-tests \
+        --without-icu --with-openssl CFLAGS="-O1 -g -fno-omit-frame-pointer" >/dev/null \
+    && make -j"$(nproc)" -s && make install -s \
+    && make -C contrib -j"$(nproc)" -s >/dev/null && make -C contrib install -s >/dev/null \
+    && make -C src/test/regress pg_regress >/dev/null
+RUN useradd -m postgres
+ENV PATH=/opt/pg/bin:$PATH \
+    PG_SRC=/usr/src/postgresql-${PG_VERSION}
+COPY . /work
+RUN chown -R postgres:postgres /work
+WORKDIR /work

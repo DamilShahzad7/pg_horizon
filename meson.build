@@ -21,6 +21,8 @@ contrib_targets += pg_horizon
 install_data(
   'pg_horizon.control',
   'pg_horizon--1.0.sql',
+  'pg_horizon--1.0--1.1.sql',
+  'pg_horizon--1.1.sql',
   kwargs: contrib_data_args,
 )
 
@@ -33,11 +35,19 @@ tests += {
       '001_basic',
       '002_explain',
       '003_permissions',
+      '004_upgrade',
+      '005_edge',
     ],
   },
   'tap': {
     'tests': [
       't/001_blockers.pl',
+      't/002_horizons.pl',
+      't/003_multixact.pl',
+      't/004_terminate.pl',
+      't/005_encoding.pl',
+      't/006_replication.pl',
+      't/007_visibility.pl',
     ],
   },
 }

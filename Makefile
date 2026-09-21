@@ -13,10 +13,10 @@ OBJS = \
 	horizon_action.o
 
 EXTENSION = pg_horizon
-DATA = pg_horizon--1.0.sql
+DATA = pg_horizon--1.0.sql pg_horizon--1.0--1.1.sql pg_horizon--1.1.sql
 PGFILEDESC = "pg_horizon - XID/MultiXact freeze horizon diagnosis"
 
-REGRESS = 001_basic 002_explain 003_permissions
+REGRESS = 001_basic 002_explain 003_permissions 004_upgrade 005_edge
 TAP_TESTS = 1
 
 PG_CONFIG ?= pg_config

@@ -43,6 +43,9 @@ is($safe, 't', 'idle-in-transaction is marked safe_to_terminate');
 my $rec = $node->safe_psql('postgres',
 	"SELECT recommended_sql LIKE '%COMMIT%' AND recommended_sql LIKE '%pg_terminate_backend%' FROM pg_horizon_blockers(false) WHERE pid = $pid");
 is($rec, 't', 'idle-in-transaction recommends commit first, terminate only if abandoned');
+is($node->safe_psql('postgres',
+		"SELECT recommended_sql !~ E'(^|\\n)SELECT pg_terminate_backend' FROM pg_horizon_blockers(false) WHERE pid = $pid"),
+	't', 'the terminate statement is commented out');
 
 # Terminate stays refused while the GUC is off — no hidden kill path.
 my $err = $node->psql('postgres',
@@ -102,7 +105,22 @@ my $prep_sql = $node->safe_psql('postgres',
 	"SELECT recommended_sql LIKE '%ROLLBACK PREPARED%' FROM pg_horizon_blockers(false) WHERE prepared_gid = 'horizon_prep'");
 is($prep_sql, 't', 'prepared recommendation is COMMIT/ROLLBACK PREPARED, not vacuum');
 
+# The advice must be safe to paste: only a lookup runs, every destructive
+# statement is commented out.
+is($node->safe_psql('postgres',
+		q{SELECT bool_and(l ~ '^(--|SELECT)') AND bool_and(l !~ '^SELECT (pg_terminate_backend|pg_cancel_backend|pg_drop_replication_slot)') FROM (SELECT unnest(string_to_array(recommended_sql, E'\n')) AS l FROM pg_horizon_blockers WHERE prepared_gid = 'horizon_prep') x}),
+	't', 'prepared advice does not contain a bare destructive statement');
+like($node->safe_psql('postgres',
+		"SELECT recommended_sql FROM pg_horizon_blockers WHERE prepared_gid = 'horizon_prep'"),
+	qr/-- COMMIT PREPARED 'horizon_prep';.*-- ROLLBACK PREPARED 'horizon_prep';/s,
+	'prepared advice offers both outcomes, commented out, after asking the coordinator');
+
 $node->safe_psql('postgres', "ROLLBACK PREPARED 'horizon_prep';");
+
+# A finished prepared transaction must not linger as a holder.
+is($node->safe_psql('postgres',
+		"SELECT count(*) FROM pg_horizon_blockers WHERE blocker_type = 'prepared'"),
+	'0', 'no phantom prepared holder after ROLLBACK PREPARED');
 
 # Lock waiters are only attributed when the held mode actually conflicts.
 $node->safe_psql('postgres', 'CREATE TABLE horizon_lock_demo(id int);');

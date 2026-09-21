@@ -1,22 +1,35 @@
-PostgreSQL Database Management System
-(also known as Postgres, formerly known as Postgres95)
+PostgreSQL License
+
+SPDX-License-Identifier: PostgreSQL
+
+pg_horizon - XID/MultiXact freeze horizon diagnosis for PostgreSQL
+https://github.com/DamilShahzad7/pg_horizon
+
+Copyright (c) 2026, pg_horizon authors
+(the people credited in the Git history of the repository above)
+
+Portions of pg_horizon are derived from PostgreSQL source code: the horizon
+computation in horizon_collect.c follows ComputeXidHorizons() in
+src/backend/storage/ipc/procarray.c, a small macro is taken from the same
+file, and the code follows PostgreSQL's coding conventions and reads its
+internal data structures. Those portions remain under the PostgreSQL copyright:
 
 Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
 Portions Copyright (c) 1994, The Regents of the University of California
-Portions Copyright (c) 2026, pg_horizon authors
 
 Permission to use, copy, modify, and distribute this software and its
 documentation for any purpose, without fee, and without a written agreement
 is hereby granted, provided that the above copyright notice and this
 paragraph and the following two paragraphs appear in all copies.
 
-IN NO EVENT SHALL THE AUTHORS OR DISTRIBUTORS BE LIABLE TO ANY PARTY FOR
-DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
-LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION,
-EVEN IF THE AUTHORS HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+IN NO EVENT SHALL THE COPYRIGHT HOLDERS NAMED ABOVE BE LIABLE TO ANY PARTY
+FOR DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES,
+INCLUDING LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+DOCUMENTATION, EVEN IF THE COPYRIGHT HOLDERS NAMED ABOVE HAVE BEEN ADVISED
+OF THE POSSIBILITY OF SUCH DAMAGE.
 
-THE AUTHORS AND DISTRIBUTORS SPECIFICALLY DISCLAIM ANY WARRANTIES, INCLUDING,
-BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS" BASIS,
-AND THE AUTHORS AND DISTRIBUTORS HAVE NO OBLIGATIONS TO PROVIDE MAINTENANCE,
-SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+THE COPYRIGHT HOLDERS NAMED ABOVE SPECIFICALLY DISCLAIM ANY WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED HEREUNDER IS ON AN
+"AS IS" BASIS, AND THE COPYRIGHT HOLDERS NAMED ABOVE HAVE NO OBLIGATIONS TO
+PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
