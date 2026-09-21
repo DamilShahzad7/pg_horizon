@@ -189,6 +189,8 @@ extern int	horizon_count_listed(const HorizonSnapshot *snap, bool holders_only);
 extern HorizonBlocker *horizon_dominant_blocker(const HorizonSnapshot *snap,
 												bool have_kind, HorizonKind kind);
 extern void horizon_copy_clip(char *dst, size_t dstsize, const char *src);
+extern char *horizon_sql_literal(const char *s);
+extern char *horizon_printable(const char *s);
 extern void horizon_fill_blocker_reason(HorizonBlocker *b,
 										const HorizonSnapshot *snap);
 

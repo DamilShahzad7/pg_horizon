@@ -4,6 +4,13 @@
 
 Correctness release. Upgrade with `ALTER EXTENSION pg_horizon UPDATE` (see README); the new library works with the 1.0 SQL definitions until you do. The update is purely additive (views replaced with appended columns, comments); no function is recreated, so administrators' `GRANT`/`REVOKE` settings are kept.
 
+### Security
+
+Both issues were found in review of the 1.1 pull request.
+
+- **SQL embedded in a prepared-transaction name could run when the advice was pasted.** `recommended_sql` put the GID in a string literal, and a GID may contain any character, including line breaks. The destructive statements in the advice are commented out with `--`, but a comment ends at the first line break, so text after a newline in the GID ran as a statement when an operator pasted the advice into psql. **1.0 is affected too** (there the `ROLLBACK PREPARED` line was not even commented out), so upgrade to 1.1. Every literal in generated advice is now a single physical line: quotes and backslashes are doubled and line breaks and other control characters are written as escapes (`E'...\n...'`). GIDs shown in `reason`, in the report and in the severity explanation, and relation names in `pg_horizon_explain().summary`, are escaped the same way.
+- **The severity explanation named a hidden session.** For a holder older than 1,000,000 XIDs, `pg_horizon_check.message` and `pg_horizon_report()` said "pid N has been idle in transaction" to every caller, although `pg_horizon_blockers` hides that session's state from roles without `pg_read_all_stats`. For a session the caller cannot see, the explanation now says only that a session of another role has held the horizon for N XIDs. This only affected the 1.1 code under review: 1.0 did not restrict session details at all, so there was nothing to bypass there.
+
 ### Fixed
 
 - **Sessions in other databases were blamed for blocking VACUUM.** The horizons came from `GetOldestNonRemovableTransactionId()`, which includes the calling backend's own snapshot xmin (inherited from any running XID in any database). A transaction in database B was reported as the data horizon of database A, `freeze_constraint = horizon` was reported for tables `VACUUM FREEZE` could advance, and `is_horizon_holder`, `horizon_holders` and `dominant_blocker` named the wrong session. Horizons are now computed from one copy of the PGPROC / prepared / slot state with the calling session excluded, using the rules of `ComputeXidHorizons()`. A session in another database now pins only the shared horizon.

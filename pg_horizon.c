@@ -83,6 +83,86 @@ horizon_setf(char *dst, size_t dstsize, const char *fmt,...)
 	pfree(buf.data);
 }
 
+/*
+ * Escape s so that it fits on one physical line: quote and backslash are
+ * doubled, and every control character (line breaks above all) is written as
+ * an escape sequence. Returns whether any backslash escape was needed, which
+ * decides whether an SQL literal has to use the E'' form.
+ *
+ * This matters because the advice we generate has its destructive statements
+ * commented out with "--", and a comment ends at the first line break. A
+ * literal that carried a newline (a prepared-transaction GID can contain any
+ * character) would let the text after it run as a statement when an operator
+ * pastes the advice.
+ */
+static bool
+horizon_escape_line(StringInfo out, const char *s, bool sql)
+{
+	bool		escaped = false;
+	const unsigned char *p;
+
+	for (p = (const unsigned char *) s; *p; p++)
+	{
+		if (*p == '\'')
+		{
+			appendStringInfoString(out, sql ? "''" : "'");
+		}
+		else if (*p == '\\')
+		{
+			appendStringInfoString(out, "\\\\");
+			escaped = true;
+		}
+		else if (*p == '\n')
+		{
+			appendStringInfoString(out, "\\n");
+			escaped = true;
+		}
+		else if (*p == '\r')
+		{
+			appendStringInfoString(out, "\\r");
+			escaped = true;
+		}
+		else if (*p < 0x20 || *p == 0x7f)
+		{
+			appendStringInfo(out, "\\%03o", (unsigned int) *p);
+			escaped = true;
+		}
+		else
+			appendStringInfoChar(out, (char) *p);
+	}
+	return escaped;
+}
+
+/* A single-line SQL string literal for s, safe to embed in commented advice. */
+char *
+horizon_sql_literal(const char *s)
+{
+	StringInfoData body;
+	StringInfoData lit;
+	bool		escaped;
+
+	initStringInfo(&body);
+	escaped = horizon_escape_line(&body, s ? s : "", true);
+
+	initStringInfo(&lit);
+	if (escaped)
+		appendStringInfoChar(&lit, 'E');
+	appendStringInfo(&lit, "'%s'", body.data);
+	pfree(body.data);
+	return lit.data;
+}
+
+/* s with line breaks and other control characters shown as escapes, for messages. */
+char *
+horizon_printable(const char *s)
+{
+	StringInfoData out;
+
+	initStringInfo(&out);
+	horizon_escape_line(&out, s ? s : "", false);
+	return out.data;
+}
+
 int64
 horizon_xid_age(TransactionId xid, TransactionId next_xid)
 {
@@ -179,10 +259,21 @@ horizon_compute_severity(const HorizonSnapshot *snap, char **why)
 		if (b->age < HORIZON_STALE_HOLDER_AGE)
 			continue;
 
+		/*
+		 * What another role's session is doing is not for every caller: the
+		 * explanation must not name its pid or state (see b->visible).
+		 */
 		if (b->type == HORIZON_BLK_BACKEND && horizon_blocker_is_idle_xact(b))
-			HORIZON_WHY(HORIZON_SEV_WARNING,
-						"pid %d has been idle in transaction holding the horizon for %lld XIDs",
-						b->pid, (long long) b->age);
+		{
+			if (b->visible)
+				HORIZON_WHY(HORIZON_SEV_WARNING,
+							"pid %d has been idle in transaction holding the horizon for %lld XIDs",
+							b->pid, (long long) b->age);
+			else
+				HORIZON_WHY(HORIZON_SEV_WARNING,
+							"a session of another role has held the horizon for %lld XIDs (its details are not visible to this role)",
+							(long long) b->age);
+		}
 
 		if ((b->type == HORIZON_BLK_PHYSICAL_SLOT ||
 			 b->type == HORIZON_BLK_LOGICAL_SLOT) && !b->slot_active)
@@ -193,7 +284,7 @@ horizon_compute_severity(const HorizonSnapshot *snap, char **why)
 		if (b->type == HORIZON_BLK_PREPARED)
 			HORIZON_WHY(HORIZON_SEV_WARNING,
 						"prepared transaction \"%s\" has held the horizon for %lld XIDs",
-						b->prepared_gid[0] ? b->prepared_gid : "(unknown gid)",
+						b->prepared_gid[0] ? horizon_printable(b->prepared_gid) : "(unknown gid)",
 						(long long) b->age);
 	}
 #undef HORIZON_WHY
@@ -485,11 +576,11 @@ horizon_fill_blocker_reason(HorizonBlocker *b, const HorizonSnapshot *snap)
 			horizon_setf(b->reason, sizeof(b->reason),
 						 "Prepared transaction xid %u (gid %s) stays in the ProcArray until COMMIT PREPARED or ROLLBACK PREPARED%s. VACUUM cannot advance past it. Raising autovacuum_freeze_max_age does not fix this.",
 						 b->xid,
-						 b->prepared_gid[0] ? b->prepared_gid : "(unknown)",
+						 b->prepared_gid[0] ? horizon_printable(b->prepared_gid) : "(unknown)",
 						 pin ? "" : " (not the oldest pin right now)");
 			if (b->prepared_gid[0])
 			{
-				char	   *lit = quote_literal_cstr(b->prepared_gid);
+				char	   *lit = horizon_sql_literal(b->prepared_gid);
 
 				horizon_setf(b->recommended_sql, sizeof(b->recommended_sql),
 							 "SELECT gid, prepared, owner, database FROM pg_prepared_xacts WHERE gid = %s;\n"
@@ -506,7 +597,7 @@ horizon_fill_blocker_reason(HorizonBlocker *b, const HorizonSnapshot *snap)
 
 		case HORIZON_BLK_PHYSICAL_SLOT:
 			{
-				char	   *lit = quote_literal_cstr(b->slot_name);
+				char	   *lit = horizon_sql_literal(b->slot_name);
 
 				horizon_setf(b->reason, sizeof(b->reason),
 							 "Physical replication slot %s holds xmin age %lld%s. If a replica still uses this slot, dropping it is wrong: fix the replica. If the replica is gone, the slot is an orphan and should be dropped.",
@@ -522,7 +613,7 @@ horizon_fill_blocker_reason(HorizonBlocker *b, const HorizonSnapshot *snap)
 
 		case HORIZON_BLK_LOGICAL_SLOT:
 			{
-				char	   *lit = quote_literal_cstr(b->slot_name);
+				char	   *lit = horizon_sql_literal(b->slot_name);
 
 				horizon_setf(b->reason, sizeof(b->reason),
 							 "Logical slot %s holds catalog_xmin age %lld%s, so catalog rows needed for decoding are not removed or frozen. Consume changes to advance it. Drop the slot only if the consumer is gone. Do not VACUUM FULL.",

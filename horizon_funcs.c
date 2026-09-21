@@ -814,7 +814,8 @@ pg_horizon_explain(PG_FUNCTION_ARGS)
 	initStringInfo(&summary);
 	appendStringInfo(&summary,
 					 "relation %s.%s relkind=%c horizon=%s relfrozenxid age=%lld relation_xmin age=%lld relminmxid age=%lld mxid_horizon=%u freeze_constraint=%s vacuum_running=%s",
-					 nspname, ci.relname, ci.relkind, horizon_kind_name(kind),
+					 horizon_printable(nspname), horizon_printable(ci.relname), ci.relkind,
+					 horizon_kind_name(kind),
 					 (long long) xage, (long long) horizon_age, (long long) mage,
 					 snap->mxid_horizon, constraint, vacuum_running ? "yes" : "no");
 

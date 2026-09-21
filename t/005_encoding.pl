@@ -105,4 +105,47 @@ is($err, '', 'multibyte application_name is valid');
 $app->query_safe('ROLLBACK;');
 $app->quit;
 
+# --- hostile prepared-transaction names ---------------------------------------
+# The advice keeps destructive statements behind "--", and a comment ends at the
+# first line break. A GID can contain any character, so every literal in the
+# advice must stay on one physical line, or the text after a newline would run
+# when an operator pastes the advice.
+$node->safe_psql('postgres', 'CREATE TABLE inj_probe(a int);');
+# Real characters (not escapes) in the GIDs, sent through dollar quoting so the
+# test setup itself cannot be broken by them.
+my @evil = (
+	"nl\nCREATE TABLE pwned_nl(a int); --",
+	"cr\rCREATE TABLE pwned_cr(a int); --",
+	"crlf\r\nCREATE TABLE pwned_crlf(a int); --",
+	"mix\\';CREATE TABLE pwned_quote(a int); --\x0b\x01",
+);
+for my $g (@evil)
+{
+	$node->safe_psql('postgres', "BEGIN; SELECT pg_current_xact_id(); PREPARE TRANSACTION \$g\$$g\$g\$;");
+}
+is($node->safe_psql('postgres', "SELECT count(*) FROM pg_horizon_blockers WHERE blocker_type = 'prepared'"),
+	scalar(@evil), 'the hostile prepared transactions are listed');
+
+my $advice = $node->safe_psql('postgres',
+	"SELECT string_agg(recommended_sql, E'\n') FROM pg_horizon_blockers WHERE blocker_type = 'prepared'");
+my @bad = grep { $_ ne '' && $_ !~ /^(--|SELECT )/ } split /\r?\n|\r/, $advice;
+is(scalar(@bad), 0, 'every physical line of the advice is a comment or a read-only SELECT');
+is($node->safe_psql('postgres',
+		q{SELECT count(*) FROM pg_horizon_blockers WHERE blocker_type = 'prepared' AND (recommended_sql ~ E'\r' OR reason ~ E'[\n\r]')}),
+	'0', 'no carriage return in the advice and no line break in any reason');
+
+# Run the advice the way an operator would (paste it into psql).
+my ($aout, $aerr) = ('', '');
+$node->psql('postgres', $advice, stdout => \$aout, stderr => \$aerr);
+is($node->safe_psql('postgres', q{SELECT count(*) FROM pg_class WHERE relname LIKE 'pwned%'}),
+	'0', 'executing the advice ran nothing embedded in a GID');
+
+# The escaped literal still finds exactly its own transaction.
+is($node->safe_psql('postgres', q{
+SELECT count(*) FROM pg_horizon_blockers b
+WHERE blocker_type = 'prepared'
+  AND EXISTS (SELECT 1 FROM pg_prepared_xacts p WHERE p.gid = b.prepared_gid)}),
+	scalar(@evil), 'gids are reported exactly, only the advice text is escaped');
+$node->safe_psql('postgres', "ROLLBACK PREPARED \$g\$$_\$g\$;") for @evil;
+
 done_testing();

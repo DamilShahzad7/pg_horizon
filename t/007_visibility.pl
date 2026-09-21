@@ -160,4 +160,34 @@ is($err, '', '400 calls with a prepared transaction present run cleanly');
 unlike(slurp_file($node->logfile, $log_off), qr/WARNING|SPI|leak/i, 'and log no warnings');
 $node->safe_psql('postgres', q{ROLLBACK PREPARED 'leak_prep';});
 
+# --- the severity explanation must not name a hidden session -----------------------
+# A holder older than 1,000,000 XIDs makes the cluster "warning" and the
+# explanation used to say "pid N has been idle in transaction" to everybody.
+my $stale = open_session($node, 'bob',
+	"SET application_name = 'bob-stale';\nBEGIN;\nSELECT pg_current_xact_id();\n");
+ok($node->poll_query_until('postgres',
+	"SELECT count(*) = 1 FROM pg_stat_activity WHERE application_name = 'bob-stale' AND state = 'idle in transaction'"),
+	'the stale holder is idle in transaction');
+my $spid = $node->safe_psql('postgres',
+	"SELECT pid FROM pg_stat_activity WHERE application_name = 'bob-stale'");
+my $burn = $node->basedir . '/burn.sql';
+append_to_file($burn, "SELECT pg_current_xact_id();\n");
+$node->command_ok(
+	[ 'pgbench', '-n', '-f', $burn, '-c', '8', '-j', '4', '-t', '135000',
+	  '-h', $node->host, '-p', $node->port, 'postgres' ],
+	'burned about a million XIDs');
+
+($out, $err) = as_user('postgres', "SELECT status, message FROM pg_horizon_check");
+like($out, qr/^warning\|pid $spid has been idle in transaction holding the horizon/,
+	'a privileged caller gets the full explanation');
+($out, $err) = as_user('alice', "SELECT status, message FROM pg_horizon_check");
+like($out, qr/^warning\|/, 'an unprivileged caller still sees the warning');
+unlike($out, qr/idle in transaction|\b$spid\b/, '... but its explanation names neither the pid nor the state');
+like($out, qr/another role has held the horizon/, '... and says why it is vague');
+($out, $err) = as_user('alice', "SELECT pg_horizon_report()");
+unlike($out, qr/idle in transaction|\bpid $spid has\b/, 'the report explanation is redacted as well');
+($out, $err) = as_user('bob', "SELECT message FROM pg_horizon_check");
+like($out, qr/pid $spid has been idle in transaction/, 'the session\'s own role sees the full explanation');
+close_session($stale);
+
 done_testing();

@@ -104,10 +104,19 @@ is($primary->safe_psql('postgres', q{
 SELECT backend_type, state FROM pg_horizon_blockers WHERE blocker_type = 'physical_slot'}),
 	'physical replication slot|active',
 	'the slot row keeps its own type and state (it is not overwritten by its walsender)');
-is($primary->safe_psql('postgres', q{
-SELECT wal_retained_bytes IS NOT NULL FROM pg_horizon_blockers WHERE blocker_type = 'physical_slot'}),
-	't', 'retained WAL is reported');
+# Retained WAL is only reported when the slot holds back some: with a fully
+# caught-up standby that can legitimately be zero (NULL here), so stop the
+# standby, write WAL, and then it must be positive.
 $hold2->query_safe('ROLLBACK;');
 $hold2->quit;
+$standby->stop;
+$primary->safe_psql('postgres',
+	"INSERT INTO t1 SELECT g FROM generate_series(1, 5000) g; SELECT pg_switch_wal();");
+ok($primary->poll_query_until('postgres', q{
+SELECT wal_retained_bytes > 0 FROM pg_horizon_blockers WHERE blocker_type = 'physical_slot'}),
+	'retained WAL is reported once the slot holds some back');
+is($primary->safe_psql('postgres', q{
+SELECT slot_active FROM pg_horizon_blockers WHERE blocker_type = 'physical_slot'}),
+	'f', 'and the slot is now inactive');
 
 done_testing();

@@ -7,7 +7,8 @@ pg_horizon is a PostgreSQL C extension. Match contrib style: tabs in C, `ereport
 - Horizons must be what a `VACUUM` started elsewhere would see, so the calling backend is excluded. The core wrappers (`GetOldestNonRemovableTransactionId` and friends) include it and must not be used for the reported horizons outside recovery. The computation in `horizon_collect.c` mirrors `ComputeXidHorizons()`; if you touch it, `t/002_horizons.pl` (which compares against `VACUUM (VERBOSE)`'s `removable cutoff`) must pass on 16, 17 and 18.
 - Do not recommend `VACUUM FULL` or raising `autovacuum_freeze_max_age` as a freeze fix.
 - Do not auto-drop replication slots. Do not terminate wraparound autovacuum.
-- Recommended SQL must be safe to paste: any statement that kills, drops, commits or rolls back is commented out.
+- Recommended SQL must be safe to paste: any statement that kills, drops, commits or rolls back is commented out, and every literal in it comes from `horizon_sql_literal()` (one physical line: a `--` comment ends at a line break, so a name containing one would otherwise run as SQL). Never use `quote_literal_cstr()` for advice. Names shown in messages go through `horizon_printable()`.
+- Explanations must not name the pid or state of a session the caller cannot see (`b->visible`), including the severity text.
 - Never take a lock on a user relation in a diagnostic; read `pg_class` through the syscache. Do not allocate while holding `ProcArrayLock`.
 - Text copied into fixed buffers goes through `horizon_copy_clip()` / `horizon_setf()`, never `strlcpy()`/`snprintf()` (they can cut a multibyte character in half).
 - Activity data must be fresh (`horizon_load_activity()` clears the pgstat snapshot). Anything that decides to signal a backend must re-check immediately before signalling.
